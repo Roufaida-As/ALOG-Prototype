@@ -1,0 +1,41 @@
+# Ce fichier lance deux services :
+# - Mosquitto : le broker MQTT qui reçoit les données des capteurs terrain
+# - Kafka + Zookeeper : le bus d'événements entre l'Edge Node et le Service de Détection
+
+version: '3.8'
+
+services:
+
+  # --- MQTT Broker (Mosquitto) ---
+  # Les capteurs publient leurs mesures ici via MQTT
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"   # port MQTT standard
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+
+  # --- Zookeeper (requis par Kafka) ---
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    ports:
+      - "2181:2181"
+
+  # --- Kafka Broker ---
+  # L'Edge Node publie les événements qualifiés ici
+  # Le Service de Détection les consomme depuis ici
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      # On crée automatiquement les topics au démarrage
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
