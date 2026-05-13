@@ -15,10 +15,10 @@ Tactiques démontrées :
 """
 
 import paho.mqtt.client as mqtt
-from kafka import KafkaProducer
-import json
+from confluent_kafka import Producer
 import time
 import threading
+import json
 
 # --- Configuration ---
 BROKER       = "localhost"
@@ -42,10 +42,9 @@ derniere_activite = {}
 HEARTBEAT_TIMEOUT = 10  # secondes sans message = capteur considéré en panne
 
 # --- Connexion Kafka ---
-producer = KafkaProducer(
-    bootstrap_servers="localhost:9092",
-    value_serializer=lambda v: json.dumps(v).encode("utf-8")
-)
+producer = Producer({
+    "bootstrap.servers": "localhost:9092"
+})
 
 def classifier_message(mesure):
     """
@@ -89,7 +88,12 @@ def on_message(client, userdata, msg):
 
         # ── TRANSMISSION VERS KAFKA ─────────────────────────────────────
         topic = TOPIC_CRITIQUE if niveau == "CRITIQUE" else TOPIC_NORMAL
-        producer.send(topic, mesure)
+        producer.produce(
+            topic,
+            json.dumps(mesure).encode("utf-8")
+        )
+
+        producer.flush()
 
         symbole = "🔴" if niveau == "CRITIQUE" else "🟡"
         print(f"[EDGE] {symbole} {niveau} | {capteur_id} | "

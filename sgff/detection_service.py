@@ -15,7 +15,7 @@ Tactiques démontrées :
   avec horodatage, source, et niveau.
 """
 
-from kafka import KafkaConsumer
+from confluent_kafka import Consumer, KafkaException
 import json
 import time
 from datetime import datetime
@@ -81,23 +81,19 @@ def traiter_alerte(mesure, priorite):
 # Deux consommateurs séparés pour respecter la priorisation
 # Le critique est traité en premier (Tactique : Schedule Resources)
 
-consumer_critique = KafkaConsumer(
-    TOPIC_CRITIQUE,
-    bootstrap_servers=BROKER,
-    value_deserializer=lambda v: json.loads(v.decode("utf-8")),
-    consumer_timeout_ms=100,    # timeout court pour rester réactif
-    auto_offset_reset="latest",
-    group_id="detection-critique"
-)
+consumer_critique = Consumer({
+    "bootstrap.servers": BROKER,
+    "group.id": "detection-critique",
+    "auto.offset.reset": "latest"
+})
 
-consumer_normal = KafkaConsumer(
-    TOPIC_NORMAL,
-    bootstrap_servers=BROKER,
-    value_deserializer=lambda v: json.loads(v.decode("utf-8")),
-    consumer_timeout_ms=100,
-    auto_offset_reset="latest",
-    group_id="detection-normal"
-)
+consumer_normal = Consumer({
+    "bootstrap.servers": BROKER,
+    "group.id": "detection-normal",
+    "auto.offset.reset": "latest"
+})
+consumer_critique.subscribe([TOPIC_CRITIQUE])
+consumer_normal.subscribe([TOPIC_NORMAL])
 
 print("=== Service de Détection SGFF démarré ===")
 print(f"Écoute sur : {TOPIC_CRITIQUE} (priorité haute) + {TOPIC_NORMAL}")
@@ -105,13 +101,13 @@ print("En attente d'événements...\n")
 
 try:
     while True:
-        # ── 1. Traiter d'abord les critiques (Tactique : Schedule Resources) ──
-        for message in consumer_critique:
-            traiter_alerte(message.value, priorite="CRITIQUE")
+        msg = consumer_critique.poll(1.0)
+        if msg is not None and not msg.error():
+            traiter_alerte(json.loads(msg.value().decode("utf-8")), "CRITIQUE")
 
-        # ── 2. Ensuite les normaux ─────────────────────────────────────────────
-        for message in consumer_normal:
-            traiter_alerte(message.value, priorite="NORMAL")
+        msg2 = consumer_normal.poll(1.0)
+        if msg2 is not None and not msg2.error():
+            traiter_alerte(json.loads(msg2.value().decode("utf-8")), "NORMAL")
 
         time.sleep(0.1)
 

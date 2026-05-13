@@ -21,8 +21,8 @@ import json
 from datetime import datetime
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
-from kafka import KafkaConsumer
 import threading
+from confluent_kafka import Consumer, KafkaException 
 
 # --- Configuration ---
 BROKER         = "localhost:9092"
@@ -241,34 +241,52 @@ def consommer_kafka(loop):
     Les messages Kafka sont mis dans une queue asyncio
     et envoyés au browser via WebSocket.
     """
-    consumer = KafkaConsumer(
-        TOPIC_CRITIQUE,
-        TOPIC_NORMAL,
-        bootstrap_servers=BROKER,
-        value_deserializer=lambda v: json.loads(v.decode("utf-8")),
-        auto_offset_reset="latest",
-        group_id="dashboard-web"
-    )
+    consumer = Consumer({
+        "bootstrap.servers": BROKER,
+        "group.id": "dashboard",
+        "auto.offset.reset": "latest"
+    })
+    consumer.subscribe([TOPIC_CRITIQUE, TOPIC_NORMAL])
 
-    for message in consumer:
-        mesure = message.value
-        type_alerte = "CRITIQUE" if message.topic == TOPIC_CRITIQUE else "NORMAL"
+def consommer_kafka(loop):
+    consumer = Consumer({
+        "bootstrap.servers": BROKER,
+        "group.id": "dashboard",
+        "auto.offset.reset": "latest"
+    })
+
+    consumer.subscribe([TOPIC_CRITIQUE, TOPIC_NORMAL])
+
+    while True:
+        msg = consumer.poll(1.0)
+
+        if msg is None:
+            continue
+
+        if msg.error():
+            print("Kafka error:", msg.error())
+            continue
+
+        # ⚠️ IMPORTANT: decode JSON
+        mesure = json.loads(msg.value().decode("utf-8"))
+
+        type_alerte = "CRITIQUE" if msg.topic() == TOPIC_CRITIQUE else "NORMAL"
 
         payload = {
-            "type":        type_alerte,
-            "timestamp":   datetime.now().strftime("%H:%M:%S"),
-            "zone":        mesure.get("zone", "?"),
-            "capteur_id":  mesure.get("capteur_id", "?"),
+            "type": type_alerte,
+            "timestamp": datetime.now().strftime("%H:%M:%S"),
+            "zone": mesure.get("zone", "?"),
+            "capteur_id": mesure.get("capteur_id", "?"),
             "temperature": mesure.get("temperature"),
-            "fumee":       mesure.get("fumee"),
-            "niveau":      mesure.get("niveau", "?"),
-            "message":     f"{mesure.get('capteur_id')} — "
-                           f"{mesure.get('temperature')}°C | "
-                           f"Fumée: {mesure.get('fumee')}"
+            "fumee": mesure.get("fumee"),
+            "niveau": mesure.get("niveau", "?"),
+            "message": f"{mesure.get('capteur_id')} — {mesure.get('temperature')}°C | Fumée: {mesure.get('fumee')}"
         }
 
-        asyncio.run_coroutine_threadsafe(alerte_queue.put(payload), loop)
-
+        asyncio.run_coroutine_threadsafe(
+            alerte_queue.put(payload),
+            loop
+        )
 
 @app.on_event("startup")
 async def startup():
