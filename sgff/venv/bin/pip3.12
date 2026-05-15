@@ -1,4 +1,4 @@
-#!/home/sarah-sid/Documents/AL/ALOG-Prototype/sgff/venv/bin/python3
+#!/home/sarah-sid/University/Studies/2CS/S2/AL/AL/ALOG-Prototype/sgff/venv/bin/python3
 # -*- coding: utf-8 -*-
 import re
 import sys

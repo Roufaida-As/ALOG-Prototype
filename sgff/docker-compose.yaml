@@ -1,31 +1,18 @@
-# Ce fichier lance deux services :
-# - Mosquitto : le broker MQTT qui reçoit les données des capteurs terrain
-# - Kafka + Zookeeper : le bus d'événements entre l'Edge Node et le Service de Détection
-
 version: '3.8'
 
 services:
-
-  # --- MQTT Broker (Mosquitto) ---
-  # Les capteurs publient leurs mesures ici via MQTT
+  # --- INFRASTRUCTURE ---
   mosquitto:
     image: eclipse-mosquitto:2
-    ports:
-      - "1883:1883"   # port MQTT standard
+    ports: ["1883:1883"]
     volumes:
       - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
 
-  # --- Zookeeper (requis par Kafka) ---
   zookeeper:
     image: confluentinc/cp-zookeeper:7.5.0
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
-    ports:
-      - "2181:2181"
 
-  # --- Kafka Broker ---
-  # L'Edge Node publie les événements qualifiés ici
-  # Le Service de Détection les consomme depuis ici
   kafka:
     image: confluentinc/cp-kafka:7.5.0
     depends_on:
@@ -35,7 +22,45 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      # We define two separate ports inside the container: 9092 and 29092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      # We tell clients where to find these listeners
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      # On crée automatiquement les topics au démarrage
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+  # --- COUCHE TERRAIN (EDGE) ---
+  edge-node:
+    build: 
+      context: .
+      dockerfile: ./terrain_layer/Dockerfile
+    depends_on:
+      - mosquitto
+      - kafka
+    environment:
+      MQTT_BROKER: mosquitto
+      KAFKA_BROKER: kafka:9092
+
+  # --- COUCHE MÉTIER (BUSINESS) ---
+  detection-service:
+    build: 
+      context: .
+      dockerfile: ./business_layer/detection_service/Dockerfile
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BROKER: kafka:9092
+
+  # --- COUCHE PRÉSENTATION ---
+  dashboard:
+    build: 
+      context: .
+      dockerfile: ./presentation_layer/Dockerfile
+    environment:
+      KAFKA_BROKER: kafka:9092
+    ports: ["8000:8000"]
+    depends_on:
+      - detection-service
+    stdin_open: true
+    tty: true
