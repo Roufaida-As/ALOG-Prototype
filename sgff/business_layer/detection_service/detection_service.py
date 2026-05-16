@@ -37,14 +37,14 @@ def get_kafka_consumers(broker):
             test_c.list_topics(timeout=2.0)
             
             # Si on arrive ici, Kafka est prêt
-            print("[DETECTION] ✅ Connecté au bus Kafka")
+            print("[DETECTION] Connecte au bus Kafka")
             
             # Création des deux consommateurs pour la priorisation
             c_crit = Consumer({**conf, "group.id": "detection-critique"})
             c_norm = Consumer({**conf, "group.id": "detection-normal"})
             return c_crit, c_norm
         except Exception as e:
-            print(f"[DETECTION] ⏳ En attente de Kafka sur {broker}... ({e})")
+            print(f"[DETECTION] En attente de Kafka sur {broker}... ({e})")
             time.sleep(5)
 
 # Initialisation
@@ -60,18 +60,25 @@ def classifier_niveau(mesure):
     fumee = mesure.get("fumee", 0)
 
     if temp >= SEUIL_NIVEAU_3 or (temp >= SEUIL_NIVEAU_2 and fumee >= 60):
-        return 3, "🔴 FEU CONFIRMÉ — Intervention immédiate"
+        return 3, "FEU CONFIRME — Intervention immediate"
     elif temp >= SEUIL_NIVEAU_2:
-        return 2, "🟠 ALERTE SÉRIEUSE — Surveillance renforcée"
+        return 2, "ALERTE SERIEUSE — Surveillance renforcee"
     else:
-        return 1, "🟡 ANOMALIE — Monitoring activé"
+        return 1, "ANOMALIE — Monitoring active"
 
 def traiter_alerte(mesure, priorite):
     """
     Tactique : Maintain Audit Trail.
     Journalise l'alerte avec tous les détails de provenance.
     """
-    niveau, description = classifier_niveau(mesure)
+    status = mesure.get("alerte_status", "")
+    phase = mesure.get("phase", "")
+    if status == "FAUX POSITIF":
+        niveau = 0
+        description = "Faux positif detecte — alerte levee"
+    else:
+        niveau, description = classifier_niveau(mesure)
+
     horodatage = datetime.now().strftime("%H:%M:%S")
 
     entree_journal = {
@@ -81,15 +88,18 @@ def traiter_alerte(mesure, priorite):
         "temperature": mesure.get("temperature"),
         "fumee":       mesure.get("fumee"),
         "niveau":      niveau,
-        "priorite":    priorite
+        "priorite":    priorite,
+        "phase":       phase,
+        "status":      status
     }
     journal_alertes.append(entree_journal)
 
     print(f"\n{'='*55}")
-    print(f"  ALERTE [{horodatage}] — Priorité: {priorite}")
+    print(f"  ALERTE [{horodatage}] — Priorite: {priorite}")
     print(f"  Source : {mesure.get('capteur_id')} | Zone : {mesure.get('zone')}")
+    print(f"  Phase : {phase or 'FINAL'} | Statut : {status or 'FINAL'}")
     print(f"  Status : Niveau {niveau} -> {description}")
-    print(f"  [AUDIT] Log #{len(journal_alertes)} enregistré.")
+    print(f"  [AUDIT] Log #{len(journal_alertes)} enregistre.")
     print(f"{'='*55}")
 
 # --- Boucle de traitement ---

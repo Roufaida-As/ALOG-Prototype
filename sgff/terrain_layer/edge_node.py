@@ -26,6 +26,7 @@ TOKENS_VALIDES = {"tok-abc123", "tok-def456", "tok-ghi789"}
 # Suivi Heartbeat
 derniere_activite = {}
 HEARTBEAT_TIMEOUT = 15  # secondes
+CONFIRMATION_DELAY = 2.0  # secondes pour la phase d'analyse approfondie
 
 KAFKA_BOOTSTRAP = os.getenv("KAFKA_BROKER", "localhost:9092")
 
@@ -38,10 +39,10 @@ def get_kafka_producer(config):
             p = Producer(config)
             # On vérifie si le broker répond réellement
             p.list_topics(timeout=2.0)
-            print("[KAFKA] ✅ Connecté au bus d'événements")
+            print("[KAFKA] Connecte au bus d'evenements")
             return p
         except Exception as e:
-            print(f"[KAFKA] ⏳ Attente de Kafka sur {KAFKA_BOOTSTRAP}... ({e})")
+            print(f"[KAFKA] Attente de Kafka sur {KAFKA_BOOTSTRAP}... ({e})")
             time.sleep(5)
 
 def connect_mqtt(client):
@@ -49,10 +50,10 @@ def connect_mqtt(client):
     while True:
         try:
             client.connect(BROKER, MQTT_PORT)
-            print(f"[MQTT] ✅ Connecté au broker {BROKER}")
+            print(f"[MQTT] Connecte au broker {BROKER}")
             break
         except Exception as e:
-            print(f"[MQTT] ⏳ Attente de Mosquitto sur {BROKER}... ({e})")
+            print(f"[MQTT] Attente de Mosquitto sur {BROKER}... ({e})")
             time.sleep(2)
 
 # Initialisation du Producer Kafka
@@ -69,6 +70,44 @@ def classifier_message(mesure):
     elif temp >= SEUIL_TEMP_NORMAL:
         return "NORMAL"
     return "ROUTINE"
+
+
+def envoyer_warning_et_analyse(mesure):
+    """Envoie une alerte préliminaire puis lance une validation approfondie."""
+    warning = {**mesure,
+               "phase": "PRELIMINAIRE",
+               "alerte_status": "WARNING",
+               "warning_sent": True}
+    producer.produce(TOPIC_CRITIQUE, json.dumps(warning).encode("utf-8"))
+    producer.poll(0)
+    print(f"[EDGE] Alerte préliminaire envoyée pour {mesure.get('capteur_id')}")
+
+    def analyse_approfondie():
+        time.sleep(CONFIRMATION_DELAY)
+        temp = mesure.get("temperature", 0)
+        fumee = mesure.get("fumee", 0)
+        if temp >= SEUIL_TEMP_CRITIQUE or fumee >= SEUIL_FUMEE:
+            phase = "CONFIRMEE"
+            alerte_status = "ALERTE CONFIRMEE"
+            topic = TOPIC_CRITIQUE
+        elif temp >= SEUIL_TEMP_NORMAL:
+            phase = "CONFIRMEE"
+            alerte_status = "ALERTE VALIDEE"
+            topic = TOPIC_NORMAL
+        else:
+            phase = "FAUX_POSITIF"
+            alerte_status = "FAUX POSITIF"
+            topic = TOPIC_NORMAL
+
+        confirmation = {**mesure,
+                        "phase": phase,
+                        "alerte_status": alerte_status}
+        producer.produce(topic, json.dumps(confirmation).encode("utf-8"))
+        producer.poll(0)
+        print(f"[EDGE] Analyse approfondie -> {alerte_status} envoyé vers {topic}")
+
+    threading.Thread(target=analyse_approfondie, daemon=True).start()
+
 
 def on_message(client, userdata, msg):
     """Traitement des messages MQTT reçus."""
@@ -92,13 +131,15 @@ def on_message(client, userdata, msg):
 
         # 4. Transmission Kafka
         mesure["niveau"] = niveau
+        if niveau == "CRITIQUE":
+            envoyer_warning_et_analyse(mesure)
+            return
+
         topic = TOPIC_CRITIQUE if niveau == "CRITIQUE" else TOPIC_NORMAL
-        
         producer.produce(topic, json.dumps(mesure).encode("utf-8"))
         producer.poll(0) # Déclenche les callbacks internes
 
-        symbole = "🔴" if niveau == "CRITIQUE" else "🟡"
-        print(f"[EDGE] {symbole} Envoyé vers {topic} | {capteur_id} ({niveau})")
+        print(f"[EDGE] Envoyé vers {topic} | {capteur_id} ({niveau})")
 
     except Exception as e:
         print(f"[EDGE] Erreur : {e}")
@@ -110,7 +151,7 @@ def surveiller_heartbeat():
         maintenant = time.time()
         for cid, last in list(derniere_activite.items()):
             if maintenant - last > HEARTBEAT_TIMEOUT:
-                print(f"[HEARTBEAT] ⚠️ Capteur {cid} déconnecté !")
+                print(f"[HEARTBEAT] Capteur {cid} deconnecte")
 
 # --- Lancement ---
 

@@ -57,6 +57,20 @@ def simuler_attaquant(client):
     client.publish(TOPIC, json.dumps(message_forge))
     print("[ATTAQUANT] Message forgé envoyé avec faux token !")
 
+
+def simuler_alerte_critique(client, capteur):
+    """Envoie un événement critique légitime pour tester la priorité."""
+    message_critique = {
+        "capteur_id": capteur["id"],
+        "zone":       capteur["zone"],
+        "token":      capteur["token"],
+        "temperature": 90.0,
+        "fumee":       90.0,
+        "timestamp":   time.time()
+    }
+    client.publish(TOPIC, json.dumps(message_critique))
+    print(f"[{capteur['id']}] 🚨 ALERTE CRITIQUE TEST envoyée !")
+
 # --- Connexion au broker MQTT ---
 client = mqtt.Client(client_id="simulateur")
 client.connect(BROKER, PORT)
@@ -83,6 +97,10 @@ try:
             print()
             simuler_attaquant(client)
             print()
+
+        # Toutes les 8 secondes, on injecte une alerte critique légitime pour tester
+        if cycle % 4 == 0:
+            simuler_alerte_critique(client, CAPTEURS[0])
 
         time.sleep(2)
 

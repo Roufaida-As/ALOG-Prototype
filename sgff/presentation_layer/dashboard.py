@@ -28,16 +28,24 @@ def consommer_kafka(loop):
         "auto.offset.reset": "latest"
     }
 
-    consumer = None
-    while consumer is None:
+    while True:
+        test_consumer = None
         try:
-            consumer = Consumer(conf)
-            consumer.list_topics(timeout=2.0)
-            print("[DASHBOARD] ✅ Connecté au bus Kafka")
+            test_consumer = Consumer(conf)
+            test_consumer.list_topics(timeout=2.0)
+            test_consumer.close()
+            print("[DASHBOARD] Connecte au bus Kafka")
+            break
         except Exception as e:
-            print(f"[DASHBOARD] ⏳ Attente de Kafka sur {BROKER}... ({e})")
+            print(f"[DASHBOARD] Attente de Kafka sur {BROKER}... ({e})")
+            if test_consumer is not None:
+                try:
+                    test_consumer.close()
+                except Exception:
+                    pass
             time.sleep(5)
 
+    consumer = Consumer(conf)
     consumer.subscribe([TOPIC_CRITIQUE, TOPIC_NORMAL])
 
     try:
@@ -48,16 +56,24 @@ def consommer_kafka(loop):
 
             mesure = json.loads(msg.value().decode("utf-8"))
             type_alerte = "CRITIQUE" if msg.topic() == TOPIC_CRITIQUE else "NORMAL"
+            status = mesure.get("alerte_status", "")
+            phase = mesure.get("phase", "")
+
+            # On n'affiche que les messages importants : warnings critiques, confirmations et faux positifs.
+            if type_alerte == "NORMAL" and not status:
+                continue
 
             payload = {
                 "type": type_alerte,
+                "phase": phase,
+                "status": status,
                 "timestamp": datetime.now().strftime("%H:%M:%S"),
                 "zone": mesure.get("zone", "?"),
                 "capteur_id": mesure.get("capteur_id", "?"),
                 "temperature": mesure.get("temperature"),
                 "fumee": mesure.get("fumee"),
                 "niveau": mesure.get("niveau", "?"),
-                "message": f"{mesure.get('capteur_id')} — {mesure.get('temperature')}°C | Fumée: {mesure.get('fumee')}"
+                "message": f"{mesure.get('capteur_id')} — {mesure.get('temperature')}°C | Fumee: {mesure.get('fumee')}"
             }
 
             asyncio.run_coroutine_threadsafe(alerte_queue.put(payload), loop)
@@ -165,13 +181,13 @@ HTML = """
     <div id="statut">Connexion WebSocket...</div>
     <script>
         const ws = new WebSocket("ws://" + window.location.host + "/ws");
-        ws.onopen = () => { document.getElementById("statut").textContent = "✅ Connecté — alertes en temps réel"; };
+        ws.onopen = () => { document.getElementById("statut").textContent = "Connecte — alertes en temps reel"; };
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
             afficherAlerte(data);
             if (data.zone) mettreAJourZone(data);
         };
-        ws.onclose = () => { document.getElementById("statut").textContent = "❌ Connexion perdue"; };
+        ws.onclose = () => { document.getElementById("statut").textContent = "Connexion perdue"; };
         function afficherAlerte(data) {
             const div = document.createElement("div");
             div.className = `alerte ${data.type || "NORMAL"}`;
@@ -179,7 +195,7 @@ HTML = """
                 <span class="alerte-heure">${data.timestamp}</span>
                 <span class="alerte-zone">${data.zone || "?"}</span>
                 <span class="alerte-detail">${data.message || ""}</span>
-                <span class="alerte-niveau">${data.niveau || data.type}</span>
+                <span class="alerte-niveau">${data.status || data.niveau || data.type}</span>
             `;
             const container = document.getElementById("alertes");
             container.insertBefore(div, container.firstChild);
