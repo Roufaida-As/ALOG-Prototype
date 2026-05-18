@@ -95,9 +95,9 @@ Terminal 5 (Dashboard avec RBAC) :
 python -m uvicorn presentation_layer.main:app --reload
 ```
 
-**Important :** Quand tu exécutes les scripts Python sur l'hôte, la variable `KAFKA_BROKER` défaut à `localhost:29092` automatiquement. La valeur `kafka:9092` est réservée aux conteneurs lancés dans le réseau Docker.
+**Important :** Quand tu exécutes les scripts Python sur l'hôte, la variable `KAFKA_BROKER` est par défaut `localhost:29092`. La valeur `kafka:9092` est réservée aux conteneurs lancés dans le réseau Docker.
 
-Ce que on dois observer :
+Ce qu'on doit observer :
 - Rejet des messages attaquants (token invalide) → `[SÉCURITÉ] Accès refusé`
 - Flux critique traité avant le flux normal → messages sur `sensor-critical` d'abord
 - Warning préliminaire puis confirmation finale pour les événements critiques
@@ -122,9 +122,9 @@ Objectif : vérifier la résilience si la partie centrale devient indisponible.
 
 1. Lancer d'abord le scénario 1.
 2. Stopper le conteneur Kafka.
-3. Observer les logs Edge Node.
+3. Observer les logs Edge Node (`[P2P] Centrale perdue → Mode P2P activé`).
 4. Redémarrer Kafka.
-5. Vérifier le retour au mode central.
+5. Vérifier le retour au mode central (`[P2P] Centrale retrouvée → Mode CENTRAL réactivé`).
 
 
 ## Combiner les tests
