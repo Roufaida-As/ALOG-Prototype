@@ -48,3 +48,41 @@ python -m uvicorn dashboard:app --reload
 | Critiques traités avant normaux dans detection_service | Schedule Resources |
 | Messages ROUTINE filtrés, non transmis à Kafka | Control data rate |
 | Résumé horodaté par zone toutes les 3s | Maintain Audit Trail |
+
+## Tester la Redondance Passive (Passive Redundancy)
+(simulation du niveau 2: coupure réseau entre les nœuds terrain et le coordinateur central)
+
+### Étape 1 — Vérifier que tout fonctionne normalement
+Dans le Terminal 2 vous devez voir :
+```
+[EDGE] 🔴 Envoyé vers sensor-critical | CAP-BJ-01 (CRITIQUE)
+[EDGE] 🟡 Envoyé vers sensor-qualified | CAP-TZ-01 (NORMAL)
+```
+
+### Étape 2 — Simuler une panne du serveur central (arrêter Kafka)
+Ouvrir un nouveau terminal et exécuter :
+```
+docker stop sgff-kafka-1
+```
+
+### Étape 3 — Attendre 30 secondes et observer
+Dans le Terminal 2 vous devez voir :
+```
+[P2P] ⚠️  Centrale perdue → Mode P2P activé
+[P2P] 🔴 traitement local | CAP-BJ-01 (CRITIQUE)
+[P2P] 🟡 traitement local | CAP-TZ-01 (NORMAL)
+```
+Les alertes continuent d'être traitées localement — le système reste opérationnel malgré la panne.
+
+### Étape 4 — Simuler le retour du serveur central (redémarrer Kafka)
+```
+docker start sgff-kafka-1
+```
+
+### Étape 5 — Observer le retour en mode normal
+Dans le Terminal 2 vous devez voir :
+```
+[P2P] ✅ Centrale retrouvée → Mode CENTRAL réactivé
+[EDGE] 🔴 Envoyé vers sensor-critical | CAP-BJ-01 (CRITIQUE)
+```
+Le système reprend automatiquement la transmission vers Kafka sans intervention humaine.
