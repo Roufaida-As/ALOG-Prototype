@@ -1,4 +1,4 @@
-from confluent_kafka import Consumer, KafkaException
+from confluent_kafka import Consumer
 import json
 import time
 from datetime import datetime
@@ -9,16 +9,31 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 
-# --- Configuration ---
-BROKER         = os.getenv("KAFKA_BROKER", "localhost:9092")
+# Configuration
+BROKER         = os.getenv("KAFKA_BROKER", "localhost:29092")
 TOPIC_CRITIQUE = "sensor-critical"
 TOPIC_NORMAL   = "sensor-qualified"
 
-# --- Etat Global ---
+# Etat Global
 clients_connectes: list[WebSocket] = []
 alerte_queue: asyncio.Queue = None
 
-# -- LOGIQUE KAFKA (Thread separe) --
+
+def iter_kafka_bootstraps():
+    """Retourne les brokers Kafka a essayer, dans l'ordre de preference."""
+    candidates = []
+    for broker in str(BROKER).split(","):
+        broker = broker.strip()
+        if broker:
+            candidates.append(broker)
+
+    for fallback in ("localhost:29092", "127.0.0.1:29092", "localhost:9092", "127.0.0.1:9092"):
+        if fallback not in candidates:
+            candidates.append(fallback)
+
+    return candidates
+
+# LOGIQUE KAFKA (Thread separe) 
 
 def consommer_kafka(loop):
     """Consomme Kafka et injecte dans la queue asyncio avec resilience."""
@@ -28,24 +43,33 @@ def consommer_kafka(loop):
         "auto.offset.reset": "latest"
     }
 
-    while True:
-        test_consumer = None
-        try:
-            test_consumer = Consumer(conf)
-            test_consumer.list_topics(timeout=2.0)
-            test_consumer.close()
-            print("[DASHBOARD] Connecte au bus Kafka")
-            break
-        except Exception as e:
-            print(f"[DASHBOARD] Attente de Kafka sur {BROKER}... ({e})")
-            if test_consumer is not None:
-                try:
-                    test_consumer.close()
-                except Exception:
-                    pass
-            time.sleep(5)
+    selected_conf = None
 
-    consumer = Consumer(conf)
+    while True:
+        for candidate in iter_kafka_bootstraps():
+            test_consumer = None
+            try:
+                candidate_conf = {**conf, "bootstrap.servers": candidate}
+                test_consumer = Consumer(candidate_conf)
+                test_consumer.list_topics(timeout=2.0)
+                test_consumer.close()
+                print(f"[DASHBOARD] Connecte au bus Kafka via {candidate}")
+                selected_conf = candidate_conf
+                break
+            except Exception as e:
+                print(f"[DASHBOARD] Attente de Kafka sur {candidate}... ({e})")
+                if test_consumer is not None:
+                    try:
+                        test_consumer.close()
+                    except Exception:
+                        pass
+
+        if selected_conf is not None:
+            break
+
+        time.sleep(5)
+
+    consumer = Consumer(selected_conf)
     consumer.subscribe([TOPIC_CRITIQUE, TOPIC_NORMAL])
 
     try:
@@ -80,7 +104,7 @@ def consommer_kafka(loop):
     finally:
         consumer.close()
 
-# -- LIFESPAN --
+# LIFESPAN
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -89,7 +113,7 @@ async def lifespan(app: FastAPI):
     loop = asyncio.get_running_loop()
     thread = threading.Thread(target=consommer_kafka, args=(loop,), daemon=True)
     thread.start()
-    print("=== Dashboard SGFF - http://localhost:8000 ===")
+    print("Dashboard SGFF - http://localhost:8000")
     yield
 
 app = FastAPI(lifespan=lifespan)

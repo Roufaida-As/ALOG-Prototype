@@ -1,13 +1,13 @@
-from confluent_kafka import Consumer, KafkaException
+from confluent_kafka import Consumer
 import json
 import time
 from datetime import datetime
 import os
 
-# --- Configuration ---
+# Configuration
 TOPIC_CRITIQUE = "sensor-critical"
 TOPIC_NORMAL   = "sensor-qualified"
-BROKER         = os.getenv("KAFKA_BROKER", "localhost:9092")
+BROKER         = os.getenv("KAFKA_BROKER", "localhost:29092")
 
 # Seuils de classification finale
 SEUIL_NIVEAU_3 = 80.0   # °C → feu confirmé
@@ -17,7 +17,21 @@ SEUIL_NIVEAU_1 = 50.0   # °C → anomalie détectée
 # Journal des alertes (Audit Trail)
 journal_alertes = []
 
-# --- Fonctions de Connexion Résilientes ---
+
+def iter_kafka_bootstraps():
+    """Retourne les brokers Kafka a essayer, dans l'ordre de preference."""
+    candidates = []
+    for broker in str(BROKER).split(","):
+        broker = broker.strip()
+        if broker:
+            candidates.append(broker)
+
+    for fallback in ("localhost:29092", "127.0.0.1:29092", "localhost:9092", "127.0.0.1:9092"):
+        if fallback not in candidates:
+            candidates.append(fallback)
+
+    return candidates
+
 
 def get_kafka_consumers(broker):
     """
@@ -25,34 +39,39 @@ def get_kafka_consumers(broker):
     Tactique : Availability (Wait for dependencies)
     """
     conf = {
-        "bootstrap.servers": broker,
-        "auto.offset.reset": "latest",
-        "enable.auto.commit": True
+        "bootstrap.servers": broker, # Adresse du broker Kafka
+        "auto.offset.reset": "latest", # comportement de consommation quand makch un offset commité : on prend les nouveaux messages dès le démarrage
+        "enable.auto.commit": True # commit automatique des offsets pour ne pas se soucier de la
+        # gestion manuelle des offsets because our prototype is simple
     }
     
     while True:
-        try:
-            # On crée un consommateur test pour vérifier si Kafka répond
-            test_c = Consumer({**conf, "group.id": "test-connection"})
-            test_c.list_topics(timeout=2.0)
-            
-            # Si on arrive ici, Kafka est prêt
-            print("[DETECTION] Connecte au bus Kafka")
-            
-            # Création des deux consommateurs pour la priorisation
-            c_crit = Consumer({**conf, "group.id": "detection-critique"})
-            c_norm = Consumer({**conf, "group.id": "detection-normal"})
-            return c_crit, c_norm
-        except Exception as e:
-            print(f"[DETECTION] En attente de Kafka sur {broker}... ({e})")
-            time.sleep(5)
+        for candidate in iter_kafka_bootstraps():
+            try:
+                candidate_conf = {**conf, "bootstrap.servers": candidate}
+                # On crée un consommateur test pour vérifier si Kafka répond.
+                test_c = Consumer({**candidate_conf, "group.id": "test-connection"})
+                test_c.list_topics(timeout=2.0)
+                test_c.close()
+
+                # Si on arrive ici, Kafka est prêt.
+                print(f"[DETECTION] Connecte au bus Kafka via {candidate}")
+
+                # Création des deux consommateurs pour la priorisation.
+                c_crit = Consumer({**candidate_conf, "group.id": "detection-critique"})
+                c_norm = Consumer({**candidate_conf, "group.id": "detection-normal"})
+                return c_crit, c_norm
+            except Exception as e:
+                print(f"[DETECTION] En attente de Kafka sur {candidate}... ({e})")
+
+        time.sleep(5)
 
 # Initialisation
 consumer_critique, consumer_normal = get_kafka_consumers(BROKER)
 consumer_critique.subscribe([TOPIC_CRITIQUE])
 consumer_normal.subscribe([TOPIC_NORMAL])
 
-# --- Logique Métier ---
+# Logique Métier
 
 def classifier_niveau(mesure):
     """Classification finale sur 3 niveaux."""
@@ -73,11 +92,10 @@ def traiter_alerte(mesure, priorite):
     """
     status = mesure.get("alerte_status", "")
     phase = mesure.get("phase", "")
-    if status == "FAUX POSITIF":
-        niveau = 0
-        description = "Faux positif detecte — alerte levee"
-    else:
-        niveau, description = classifier_niveau(mesure)
+    niveau, description = classifier_niveau(mesure)
+
+    # Le flux actuel de l'Edge publie uniquement des alertes préliminaires et confirmées
+    # On garde `status` et `phase` pour l'audit, mais on ne dépend plus d'un cas faux positif
 
     horodatage = datetime.now().strftime("%H:%M:%S")
 
@@ -100,22 +118,24 @@ def traiter_alerte(mesure, priorite):
     print(f"  Phase : {phase or 'FINAL'} | Statut : {status or 'FINAL'}")
     print(f"  Status : Niveau {niveau} -> {description}")
     print(f"  [AUDIT] Log #{len(journal_alertes)} enregistre.")
-    print(f"{'='*55}")
+    print()
 
-# --- Boucle de traitement ---
+# Boucle de traitement
 
-print("=== Service de Détection SGFF Opérationnel ===")
+print("Service de Détection SGFF Opérationnel ...")
 print(f"Priorisation activée : {TOPIC_CRITIQUE} traité en premier.")
 
 try:
     while True:
-        # 1. Traitement Prioritaire (Critique)
-        # On poll le topic critique avec un timeout court
+        # 1 Traitement Prioritaire (Critique)
+        # On poll le topic critique avec un timeout court, poll veut dire "interroger" 
+        # le broker pour voir s'il y a des messages disponibles, si oui, il les retourne,
+        # sinon il attend jusqu'à ce que le timeout soit atteint et retourne None
         msg = consumer_critique.poll(0.5)
         if msg is not None and not msg.error():
             traiter_alerte(json.loads(msg.value().decode("utf-8")), "CRITIQUE")
 
-        # 2. Traitement Normal
+        # 2 Traitement Normal
         msg2 = consumer_normal.poll(0.5)
         if msg2 is not None and not msg2.error():
             traiter_alerte(json.loads(msg2.value().decode("utf-8")), "NORMAL")
@@ -124,7 +144,7 @@ try:
         time.sleep(0.01)
 
 except KeyboardInterrupt:
-    print(f"\nArrêt du service. {len(journal_alertes)} alertes journalisées.")
+    print(f"\nArrêt du service. {len(journal_alertes)} alertes journalisées!")
 finally:
     consumer_critique.close()
     consumer_normal.close()

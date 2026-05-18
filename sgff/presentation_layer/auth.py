@@ -12,7 +12,6 @@ Rôles :
 import uuid
 from datetime import datetime
 from fastapi import Request
-from fastapi.responses import HTMLResponse, RedirectResponse
 
 # ══════════════════════════════════════════════════════
 # RBAC : Utilisateurs et leurs rôles
@@ -46,9 +45,10 @@ def get_session(request: Request):
 
 def verifier_login(login: str, mot_de_passe: str):
     """Vérifie les credentials. Retourne le rôle si valide, None sinon."""
-    utilisateur = UTILISATEURS.get(login)
+    # Case-insensitive username lookup
+    utilisateur = UTILISATEURS.get(login.lower())
     if not utilisateur or utilisateur["mot_de_passe"] != mot_de_passe:
-        print(f"[RBAC] ⛔ Accès refusé — identifiants invalides pour '{login}'")
+        print(f"[RBAC] Accès refusé — identifiants invalides pour '{login}'")
         return None
     return utilisateur["role"]
 
@@ -121,7 +121,7 @@ def get_admin_html(sessions: dict) -> str:
         a {{ color: #ff6b35; }}
     </style></head>
     <body>
-        <h2>⚙️ Panneau Admin — Sessions actives</h2>
+        <h2>Panneau Admin — Sessions actives</h2>
         <table>
             <tr><th>Login</th><th>Rôle</th><th>Connecté à</th></tr>
             {lignes}

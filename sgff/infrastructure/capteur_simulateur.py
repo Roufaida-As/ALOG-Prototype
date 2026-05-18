@@ -23,13 +23,15 @@ TOPIC  = "sgff/capteurs"   # topic MQTT où tous les capteurs publient
 # Identifiants légitimes (en prod : certificats X.509)
 CAPTEURS = [
     {"id": "CAP-TZ-01", "zone": "Tizi Ouzou", "token": "tok-abc123", "base_temp": 38},
-    {"id": "CAP-BJ-01", "zone": "Béjaïa",     "token": "tok-def456", "base_temp": 35},
+    {"id": "CAP-BJ-01", "zone": "Bejaia",     "token": "tok-def456", "base_temp": 35},
     {"id": "CAP-BL-01", "zone": "Blida",       "token": "tok-ghi789", "base_temp": 32},
 ]
 
 def simuler_mesure(capteur):
     """Génère une mesure réaliste avec variation aléatoire."""
+    # Température de base + fluctuation aléatoire pour simuler des conditions changeantes 
     temp = capteur["base_temp"] + random.uniform(-3, 25)
+    # Fumée : fluctuation aléatoire, avec une probabilité plus élevée de valeurs élevées en zone critique
     fumee = random.uniform(0, 100)
     return {
         "capteur_id": capteur["id"],
@@ -44,7 +46,7 @@ def simuler_attaquant(client):
     """
     Simule un attaquant qui injecte de fausses données.
     Pas de token valide → doit être rejeté par l'Edge Node.
-    (Tactique : Authenticate Actors)
+    (Tactique : Revoke actor)
     """
     message_forge = {
         "capteur_id": "ATTAQUANT",
@@ -54,6 +56,7 @@ def simuler_attaquant(client):
         "fumee":       100.0,
         "timestamp":   time.time()
     }
+    # json.dumps pour simuler un message MQTT typique, dumps encode en bytes pour MQTT
     client.publish(TOPIC, json.dumps(message_forge))
     print("[ATTAQUANT] Message forgé envoyé avec faux token !")
 
@@ -69,17 +72,22 @@ def simuler_alerte_critique(client, capteur):
         "timestamp":   time.time()
     }
     client.publish(TOPIC, json.dumps(message_critique))
-    print(f"[{capteur['id']}] 🚨 ALERTE CRITIQUE TEST envoyée !")
+    print(f"[{capteur['id']}] ALERTE CRITIQUE TEST envoyée !")
 
 # --- Connexion au broker MQTT ---
 client = mqtt.Client(client_id="simulateur")
 client.connect(BROKER, PORT)
+# Démarrage de la boucle MQTT dans un thread séparé pour ne pas bloquer le simulateur
 client.loop_start()
 
-print("=== Simulateur de capteurs SGFF démarré ===")
+print("Simulateur de capteurs SGFF est démarré...")
 print("Capteurs actifs :", [c["id"] for c in CAPTEURS])
 print("Ctrl+C pour arrêter\n")
 
+# cycle sert de compteur d'itération de la boucle(tour de boucle),
+# elle compte combien de fois 
+# le programme a exécuté le tour complet de la boucle while true
+# cela nous permet de faire des actions à des intervalles réguliers (ex: toutes les 5 itérations)
 cycle = 0
 try:
     while True:
