@@ -5,6 +5,7 @@ import threading
 import json
 import os
 
+
 # Configuration
 # Utilise les noms des services Docker définis dans docker-compose.yaml
 BROKER       = os.getenv("MQTT_BROKER", "localhost")
