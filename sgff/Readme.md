@@ -53,7 +53,7 @@ python -m uvicorn dashboard:app --reload
 (simulation du niveau 2: coupure réseau entre les nœuds terrain et le coordinateur central)
 
 ### Étape 1 — Vérifier que tout fonctionne normalement
-Dans le Terminal 2 vous devez voir :
+Dans le Terminal 2 vous devez voir : (edge_node est execute au niveau de ce terminal)
 ```
 [EDGE] 🔴 Envoyé vers sensor-critical | CAP-BJ-01 (CRITIQUE)
 [EDGE] 🟡 Envoyé vers sensor-qualified | CAP-TZ-01 (NORMAL)
